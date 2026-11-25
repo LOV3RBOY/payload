@@ -2,8 +2,9 @@
 
 import { Environment, Lightformer } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
+import { Airtime, AIRTIME_FALLBACK_URL, AIRTIME_URL } from "@/components/astronaut/airtime";
 import { AstronautModel, type RigNodes } from "@/components/astronaut/astronaut-model";
 import {
   sampleArrive,
@@ -25,13 +26,23 @@ function applyPose(rig: RigNodes, pose: Pose) {
   rig.legR?.rotation.set(pose.legR, 0, -0.04);
 }
 
-function Framing({ frame }: { frame: AstronautFrame }) {
+function Framing({ frame, compact }: { frame: AstronautFrame; compact: boolean }) {
   const camera = useThree((state) => state.camera);
   const width = useThree((state) => state.size.width);
   const height = useThree((state) => state.size.height);
   useEffect(() => {
     const aspect = width / Math.max(height, 1);
-    if (frame === "hero") {
+    if (compact) {
+      if (frame === "hero") {
+        const distance = aspect < 0.75 ? 3.65 : 3.35;
+        camera.position.set(0.22, 0.78, distance);
+        camera.lookAt(0, 0.58, 0);
+      } else {
+        const distance = aspect < 0.9 ? 3.15 : 2.95;
+        camera.position.set(0.55, 0.72, distance);
+        camera.lookAt(0, 0.5, 0);
+      }
+    } else if (frame === "hero") {
       const distance = aspect < 0.75 ? 8.7 : 8.2;
       camera.position.set(0.9, 1.32, distance);
       camera.lookAt(0, 1.4, 0);
@@ -41,7 +52,7 @@ function Framing({ frame }: { frame: AstronautFrame }) {
       camera.lookAt(0, 1.05, 0);
     }
     camera.updateProjectionMatrix();
-  }, [camera, frame, height, width]);
+  }, [camera, compact, frame, height, width]);
   return null;
 }
 
@@ -64,7 +75,7 @@ function useDustTexture() {
   }, []);
 }
 
-function Dust({ burst }: { burst: number }) {
+function Dust({ burst, spread = 1 }: { burst: number; spread?: number }) {
   const group = useRef<THREE.Group>(null);
   const life = useRef(8);
   const texture = useDustTexture();
@@ -96,12 +107,12 @@ function Dust({ burst }: { burst: number }) {
       const spec = specs[index];
       if (!spec) return;
       child.position.set(
-        Math.cos(spec.angle) * spec.speed * t,
-        Math.max(0, spec.up * t - 0.9 * t * t),
-        Math.sin(spec.angle) * spec.speed * t * 0.4,
+        Math.cos(spec.angle) * spec.speed * t * spread,
+        Math.max(0, spec.up * t - 0.9 * t * t) * spread,
+        Math.sin(spec.angle) * spec.speed * t * 0.4 * spread,
       );
       const sprite = child as THREE.Sprite;
-      const scale = spec.size * (0.6 + t * 2.4);
+      const scale = spec.size * (0.6 + t * 2.4) * spread;
       sprite.scale.set(scale, scale, 1);
       sprite.material.opacity = fade * 0.7;
     });
@@ -120,23 +131,28 @@ function Dust({ burst }: { burst: number }) {
   );
 }
 
-function Pedestal({ accent }: { accent: string }) {
+function Pedestal({ accent, compact }: { accent: string; compact?: boolean }) {
+  const top = compact ? 0.36 : 0.98;
+  const bottom = compact ? 0.42 : 1.08;
+  const height = compact ? 0.07 : 0.12;
+  const ringIn = compact ? 0.28 : 0.78;
+  const ringOut = compact ? 0.36 : 0.94;
   return (
-    <group position={[0, -0.02, 0]}>
-      <mesh position={[0, -0.05, 0]}>
-        <cylinderGeometry args={[0.98, 1.08, 0.12, 48]} />
+    <group position={[0, compact ? -0.01 : -0.02, 0]}>
+      <mesh position={[0, -height / 2, 0]}>
+        <cylinderGeometry args={[top, bottom, height, 48]} />
         <meshStandardMaterial color="#101624" metalness={0.45} roughness={0.32} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-        <ringGeometry args={[0.78, 0.94, 64]} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]}>
+        <ringGeometry args={[ringIn, ringOut, 64]} />
         <meshBasicMaterial color={accent} toneMapped={false} />
       </mesh>
-      <pointLight color={accent} intensity={3.2} distance={3.4} position={[0, 0.25, 0.2]} />
+      <pointLight color={accent} intensity={compact ? 1.4 : 3.2} distance={compact ? 1.8 : 3.4} position={[0, 0.2, 0.2]} />
     </group>
   );
 }
 
-function BlobShadow() {
+function BlobShadow({ compact }: { compact?: boolean }) {
   const texture = useMemo(() => {
     const canvas = document.createElement("canvas");
     canvas.width = 128;
@@ -155,7 +171,7 @@ function BlobShadow() {
   if (!texture) return null;
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0.05]}>
-      <planeGeometry args={[1.8, 1.1]} />
+      <planeGeometry args={compact ? [0.72, 0.42] : [1.8, 1.1]} />
       <meshBasicMaterial map={texture} transparent depthWrite={false} />
     </mesh>
   );
@@ -237,6 +253,48 @@ function Rig({
   return <AstronautModel ref={rig} colors={colors} />;
 }
 
+function SuitingUp() {
+  const group = useRef<THREE.Group>(null);
+  useFrame((_, delta) => {
+    if (group.current) group.current.rotation.y += delta * 0.8;
+  });
+  return (
+    <group ref={group} position={[0, 0.48, 0]}>
+      <mesh>
+        <sphereGeometry args={[0.22, 28, 20]} />
+        <meshPhysicalMaterial color="#f4f7fb" roughness={0.35} clearcoat={0.5} />
+      </mesh>
+      <mesh position={[0, 0.01, 0.1]} scale={[0.9, 0.72, 0.5]}>
+        <sphereGeometry args={[0.15, 20, 16]} />
+        <meshStandardMaterial color="#141820" metalness={1} roughness={0.12} />
+      </mesh>
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, -0.42, 0]}>
+        <torusGeometry args={[0.28, 0.012, 8, 32]} />
+        <meshBasicMaterial color="#5ce1ff" />
+      </mesh>
+    </group>
+  );
+}
+
+class ModelBoundary extends Component<
+  { children: ReactNode; fallback: ReactNode; onFail?: () => void },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch() {
+    this.props.onFail?.();
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
 function Scene({
   colors,
   animation,
@@ -245,28 +303,43 @@ function Scene({
   onImpact,
 }: AstronautCanvasProps) {
   const [burst, setBurst] = useState(0);
+  const [kind, setKind] = useState<"character" | "procedural">("character");
+  const compact = kind === "character";
+  const characterProps = {
+    colors,
+    animation,
+    frame,
+    onComplete,
+    onImpact,
+    onBurst: () => setBurst((value) => value + 1),
+  };
 
   return (
     <>
-      <Framing frame={frame} />
-      <ambientLight intensity={0.42} color="#d5def8" />
-      <directionalLight position={[3.4, 5.2, 3.2]} intensity={2.15} color="#fff7ee" />
-      <directionalLight position={[-3.2, 1.6, -1.5]} intensity={0.55} color="#8eb6ff" />
-      <pointLight position={[2.4, 3.1, 2.4]} intensity={10} distance={12} color="#ffffff" />
-      <Environment resolution={128}>
-        <Lightformer intensity={3.2} color="#ffffff" position={[2.6, 3, 2]} scale={[4, 4, 1]} />
-        <Lightformer intensity={1.6} color="#8fe7ff" position={[-3.5, 1, -1]} scale={[2, 5, 1]} />
-        <Lightformer intensity={0.8} color="#2a1848" position={[0, -1, 3]} scale={[6, 2, 1]} />
+      <Framing frame={frame} compact={compact} />
+      <ambientLight intensity={0.4} color="#e7ebf6" />
+      <directionalLight position={[2.2, 3.2, 2.4]} intensity={1.35} color="#fff7ee" />
+      <directionalLight position={[-1.8, 1.1, -1]} intensity={0.45} color="#b7d0ff" />
+      <pointLight position={[1.2, 1.6, 1.4]} intensity={2.4} distance={6} color="#ffffff" />
+      <Environment resolution={64}>
+        <Lightformer intensity={2.6} color="#ffffff" position={[1.4, 1.6, 1.2]} scale={[2, 2, 1]} />
+        <Lightformer intensity={1.3} color="#8fe7ff" position={[-1.6, 0.6, -0.4]} scale={[1, 2, 1]} />
       </Environment>
-      <Rig
-        colors={colors}
-        animation={animation}
-        onComplete={onComplete}
-        onImpact={onImpact}
-        onBurst={() => setBurst((value) => value + 1)}
-      />
-      {frame === "stage" ? <Pedestal accent={colors.accent} /> : <BlobShadow />}
-      <Dust burst={burst} />
+      <ModelBoundary
+        fallback={
+          <ModelBoundary onFail={() => setKind("procedural")} fallback={<Rig {...characterProps} />}>
+            <Suspense fallback={<SuitingUp />}>
+              <Airtime url={AIRTIME_FALLBACK_URL} {...characterProps} />
+            </Suspense>
+          </ModelBoundary>
+        }
+      >
+        <Suspense fallback={<SuitingUp />}>
+          <Airtime url={AIRTIME_URL} {...characterProps} />
+        </Suspense>
+      </ModelBoundary>
+      {frame === "stage" ? <Pedestal accent={colors.accent} compact={compact} /> : <BlobShadow compact={compact} />}
+      <Dust burst={burst} spread={compact ? 0.42 : 1} />
     </>
   );
 }
@@ -283,7 +356,7 @@ export function AstronautCanvas({
     <Canvas
       className={className}
       style={{ pointerEvents: "none", width: "100%", height: "100%" }}
-      dpr={[1, 1.6]}
+      dpr={[1, 1.35]}
       gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
       camera={{ position: [0.2, 1.2, 5.4], fov: frame === "hero" ? 33 : 30, near: 0.1, far: 40 }}
       onCreated={({ gl, scene }) => {
