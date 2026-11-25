@@ -4,6 +4,11 @@ import { cannedReply, personalityVoice } from "@/lib/personalities";
 import { getStore } from "@/lib/storage";
 import type { ChatTurn, Delivery } from "@/lib/storage/types";
 
+// Nous Portal, OpenAI-compatible.
+// Base URL and Hermes-4-70B are the ids in
+// https://hermes-agent.nousresearch.com/docs/integrations/nous-portal
+// and https://huggingface.co/NousResearch/Hermes-4-70B.
+// An empty LLM_API_KEY, or any failed call, uses the canned voice.
 const DEFAULT_BASE_URL = "https://inference-api.nousresearch.com/v1";
 const DEFAULT_MODEL = "Hermes-4-70B";
 

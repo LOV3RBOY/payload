@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { MAX_BODY_BYTES, MAX_CHAT_TURNS, MAX_CREATES_PER_HOUR } from "@/lib/limits";
-import { createReplyStream } from "@/lib/llm/adapter";
+import { createReplyStream, llmConfigured } from "@/lib/llm/adapter";
 import { limitLine } from "@/lib/personalities";
 import { allowChat, allowCreate, clientIp, parseChatInput, parseCreateInput } from "@/lib/safety";
 import { getStore } from "@/lib/storage";
@@ -99,6 +99,7 @@ export async function chatWithDelivery(request: Request, id: string) {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
+      "X-Payload-Voice": llmConfigured() ? "hermes" : "canned",
     },
   });
 }
