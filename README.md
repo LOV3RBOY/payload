@@ -34,8 +34,8 @@ Supabase schema: `supabase/schema.sql`. Row level security is on and there are n
 
 - **Send** (`/`) builds a delivery: colors, personality, name, message. Launch returns a share link.
 - **Landing** (`/d/[id]`) plays the arrival, types the message, then offers Reply, Hide, and Make your own.
-- **Astronaut** is AIRTIME, a skinned glTF in `public/models/airtime.glb` (Meshopt + WebP). `useGLTF` turns Meshopt on. If that file fails, the loader tries `airtime-uncompressed.glb`, then the original procedural astronaut. The public props stay `colors`, `animation` (`idle | arrive | talk | depart`), and `frame` (`hero | stage`). Suit, visor, and accent tint the single albedo in the shader: dark pixels stay the visor, cyan pixels take the accent, and the rest of the suit is multiplied by the suit color. There is no separate visor material in this file.
-- **Clips** are registered by name from the GLB (`src/components/astronaut/clip-registry.ts`). Idle, Walk, Run, and Jump ship today. Courier states pick the first name that exists: talk looks for `Talk` then `Idle`, arrive flies with `Fly` or `Jump`, the landing prefers `Land`, and depart prefers `Wave` before a procedural arm wave. A later LLM call can play any registered name.
+- **Astronaut** is AIRTIME, a skinned glTF in `public/models/airtime-rigged.glb` (Meshopt + WebP + quantization). `useGLTF` turns Meshopt on. If that file fails, the loader tries `airtime-rigged-uncompressed.glb`, then the original procedural astronaut. The public animation prop stays `idle | arrive | talk | depart`. Arrive plays `FlyIn`, then `Land`, then `DustOff`, with a dust puff and a light squash at impact. Talk loops while a bubble is typing, then Idle. Depart plays `Wave`, then `FlyOff`. Suit, visor, and accent still tint the single albedo: dark pixels become the visor, cyan-leaning pixels take the accent, and the rest is the suit.
+- **Clips** are registered by name from the GLB (`src/components/astronaut/clip-registry.ts`). The rig is a 30-bone Mixamo skeleton (`mixamorig:` names) plus helmet, backpack, and mitten-curl bones, bound in an A-pose. A reply may start with one gesture tag — `[wave]`, `[shrug]`, `[celebrate]`, `[think]`, `[facepalm]`, `[bow]`, `[dance]`, `[sad]`, `[laugh]`, or `[point]` — which is stripped from the text and played once, then crossfades back to Talk or Idle. The head keeps a small look-at. Nothing else is posed by hand.
 - **Speech** is HTML over the canvas so type stays sharp.
 - **Storage** (`src/lib/storage`) is one interface. Supabase when both env vars are set, otherwise a JSON file, otherwise memory if the disk is not writable.
 - **LLM** (`src/lib/llm/adapter.ts`) is the only place that talks to a model. Route handlers never call a provider directly.
@@ -47,14 +47,12 @@ Supabase schema: `supabase/schema.sql`. Row level security is on and there are n
 - **Desktop overlay.** A small always-on-top window for the companion, reusing the stage component.
 - **iOS.** A share-sheet target and a home-screen wrapper. The link already works in mobile Safari.
 - **Cosmetics.** Gear slots on top of AIRTIME. New clips drop into the same GLB; see below.
+- **Bring your own model.** OpenRouter OAuth PKCE and pasted API keys, still through the one adapter. The env base URL, key, and model are the seam.
 
 ## Adding animation clips
 
-Export a clip on this same skeleton (the bone names in `MODEL` notes: `Hips`, `Spine02`, `Spine01`, `Spine`, `neck`, `Head`, `LeftArm`, `RightArm`, and the rest). Name it in Pascal case: `Wave`, `Land`, `Talk`, `Fly`, `Shrug`, `Dance`.
+Export a clip on this Mixamo skeleton. Bone names look like `mixamorig:Hips`, `mixamorig:Spine`, `mixamorig:Spine1`, `mixamorig:Spine2`, `mixamorig:Neck`, `mixamorig:Head`, plus `Helmet`, `Backpack`, and the mitten-curl bones. Name the clip in Pascal case, matching the ones already in the file: `Idle`, `FlyIn`, `Land`, `DustOff`, `Talk`, `Wave`, `FlyOff`, `Shrug`, `Point`, `Celebrate`, `Think`, `Facepalm`, `Bow`, `Dance`, `Sad`, `Laugh`, `Walk`, `Run`, `Jump`.
 
-Merge that clip into `public/models/airtime.glb` and `public/models/airtime-uncompressed.glb`. Do not rescale the armature. It stays at `0.01`, and the skinned character is already 1 unit tall.
+Merge that clip into `public/models/airtime-rigged.glb` and `public/models/airtime-rigged-uncompressed.glb`. Do not scale the armature. The skinned character is already about 1 unit tall, feet near y=0, facing +Z.
 
-On load, `buildClipRegistry` indexes every clip by name. No code change is required for the name to become addressable. If the name is one the courier states already look for (`Talk`, `Fly`, `Land`, `Wave`), that state uses it automatically. Anything else is available to a later gesture call through `listGestures`.
-
-Keep feet near y=0. Clips that dip a centimeter or two are lifted by a small model offset.
-- **Bring your own model.** OpenRouter OAuth PKCE and pasted API keys, still through the one adapter. The env base URL, key, and model are the seam.
+On load, `buildClipRegistry` indexes every clip by name. Courier states play `FlyIn` → `Land` → `DustOff`, `Talk`, `Idle`, `Wave`, and `FlyOff` directly. A gesture tag in a reply plays the matching clip once.

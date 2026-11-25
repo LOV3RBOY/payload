@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 function useTypewriter(text: string, active: boolean, speed = 16) {
@@ -28,13 +28,31 @@ export function SpeechBubble({
   text,
   animate = true,
   className,
+  onDone,
 }: {
   text: string;
   animate?: boolean;
   className?: string;
+  onDone?: () => void;
 }) {
   const typed = useTypewriter(text, animate, 16);
   const typing = animate && !typed.done;
+  const onDoneRef = useRef(onDone);
+  const fired = useRef(false);
+
+  useEffect(() => {
+    onDoneRef.current = onDone;
+  }, [onDone]);
+
+  useEffect(() => {
+    fired.current = false;
+  }, [text, animate]);
+
+  useEffect(() => {
+    if (!typed.done || fired.current) return;
+    fired.current = true;
+    onDoneRef.current?.();
+  }, [typed.done]);
 
   return (
     <button

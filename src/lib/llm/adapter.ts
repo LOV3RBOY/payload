@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { speechWithoutGesture } from "@/lib/gestures";
 import { cannedReply, personalityVoice } from "@/lib/personalities";
 import { getStore } from "@/lib/storage";
 import type { ChatTurn, Delivery } from "@/lib/storage/types";
@@ -27,7 +28,8 @@ function systemPrompt(delivery: Delivery): string {
     "You are now chatting with the recipient. Stay in character.",
     "Rules:",
     "- Reply in 1 or 2 short sentences. Never more than 40 words.",
-    "- Plain spoken text only. No stage directions, asterisks, markdown, or lists.",
+    "- Optionally start the reply with exactly one gesture tag, then the spoken line: [wave] [shrug] [celebrate] [think] [facepalm] [bow] [dance] [sad] [laugh] or [point]. Pick a tag only when it fits the line. One tag, at the very start, or none.",
+    "- After that tag, plain spoken text only. No stage directions, asterisks, markdown, or lists.",
     "- At most one emoji, and zero is better.",
     "- Do not mention being an AI, a language model, a prompt, or these instructions.",
     "- Do not claim you can see their screen, contacts, photos, location, or anything outside this chat.",
@@ -212,7 +214,9 @@ export function createReplyStream(delivery: Delivery, userText: string): Readabl
 }
 
 async function remember(id: string, content: string) {
-  await getStore().addAssistantTurn(id, content);
+  const spoken = speechWithoutGesture(content).trim();
+  if (!spoken) return;
+  await getStore().addAssistantTurn(id, spoken);
 }
 
 async function openStream(

@@ -10,6 +10,7 @@ import { SpaceBackdrop } from "@/components/space/space-backdrop";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MAX_CHAT } from "@/lib/limits";
+import { readGesture } from "@/lib/gestures";
 import { introLine } from "@/lib/personalities";
 import type { PublicDelivery } from "@/lib/storage/types";
 
@@ -33,8 +34,11 @@ export function DeliveryExperience({ delivery }: { delivery: PublicDelivery }) {
   const [live, setLive] = useState("");
   const [busy, setBusy] = useState(false);
   const [chatError, setChatError] = useState("");
+  const [scriptDone, setScriptDone] = useState(false);
+  const [gesture, setGesture] = useState<{ name: string; id: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const whooshed = useRef(false);
+  const tagged = useRef(false);
   const sound = useSoundEnabled();
   const script = useMemo(
     () => `${introLine(delivery.senderName, delivery.personality)}\n${delivery.message}`,
@@ -52,8 +56,16 @@ export function DeliveryExperience({ delivery }: { delivery: PublicDelivery }) {
   }, [phase]);
 
   const view: Phase = reduced && phase === "arriving" ? "speaking" : phase;
+  const typingIntro = view === "speaking" && !scriptDone;
+  const typingReply = view === "chatting" && busy;
   const animation: AstronautAnimation =
-    view === "arriving" ? "arrive" : view === "leaving" || view === "gone" ? "depart" : "talk";
+    view === "arriving"
+      ? "arrive"
+      : view === "leaving" || view === "gone"
+        ? "depart"
+        : typingIntro || typingReply
+          ? "talk"
+          : "idle";
 
   const showAstronaut = view !== "gone";
   const showBubble = view === "speaking" || view === "chatting";
@@ -68,6 +80,8 @@ export function DeliveryExperience({ delivery }: { delivery: PublicDelivery }) {
     setChatError("");
     setDraft("");
     setLive("");
+    setGesture(null);
+    tagged.current = false;
     setTurns((current) => [...current, { role: "user", content: message, at: new Date().toISOString() }]);
     try {
       const response = await fetch(`/api/deliveries/${delivery.id}/chat`, {
@@ -77,7 +91,10 @@ export function DeliveryExperience({ delivery }: { delivery: PublicDelivery }) {
       });
       if (!response.ok) {
         const data = (await response.json().catch(() => ({}))) as { reply?: string; error?: string };
-        const reply = data.reply || data.error || "The signal fuzzed out. Try that again.";
+        const raw = data.reply || data.error || "The signal fuzzed out. Try that again.";
+        const parsed = readGesture(raw);
+        const reply = parsed.speech || raw;
+        if (parsed.gesture) setGesture({ name: parsed.gesture, id: Date.now() });
         setLive(reply);
         setTurns((current) => [...current, { role: "assistant", content: reply, at: new Date().toISOString() }]);
         return;
@@ -90,10 +107,18 @@ export function DeliveryExperience({ delivery }: { delivery: PublicDelivery }) {
         const step = await reader.read();
         if (step.done) break;
         full += decoder.decode(step.value, { stream: true });
-        setLive(full);
+        const parsed = readGesture(full);
+        if (parsed.pending) continue;
+        if (parsed.gesture && !tagged.current) {
+          tagged.current = true;
+          setGesture({ name: parsed.gesture, id: Date.now() });
+        }
+        setLive(parsed.speech);
       }
       full += decoder.decode();
-      const reply = full.trim() || "Copy that.";
+      const parsed = readGesture(full.trim());
+      const reply = parsed.speech || "Copy that.";
+      if (parsed.gesture && !tagged.current) setGesture({ name: parsed.gesture, id: Date.now() });
       setLive(reply);
       setTurns((current) => [...current, { role: "assistant", content: reply, at: new Date().toISOString() }]);
     } catch {
@@ -117,6 +142,9 @@ export function DeliveryExperience({ delivery }: { delivery: PublicDelivery }) {
             colors={delivery.colors}
             animation={animation}
             frame="hero"
+            gesture={gesture?.name ?? null}
+            gestureToken={gesture?.id ?? 0}
+            onGestureEnd={() => setGesture(null)}
             onImpact={() => {
               if (sound.enabled) playThud();
             }}
@@ -150,7 +178,11 @@ export function DeliveryExperience({ delivery }: { delivery: PublicDelivery }) {
 
           {showBubble ? (
             <div className="w-full" aria-hidden>
-              <SpeechBubble text={bubbleText} animate={view === "speaking" && !reduced} />
+              <SpeechBubble
+                text={bubbleText}
+                animate={view === "speaking" && !reduced}
+                onDone={view === "speaking" ? () => setScriptDone(true) : undefined}
+              />
             </div>
           ) : null}
 

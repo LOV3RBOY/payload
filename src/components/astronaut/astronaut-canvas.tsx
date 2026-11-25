@@ -299,8 +299,11 @@ function Scene({
   colors,
   animation,
   frame = "hero",
+  gesture,
+  gestureToken,
   onComplete,
   onImpact,
+  onGestureEnd,
 }: AstronautCanvasProps) {
   const [burst, setBurst] = useState(0);
   const [kind, setKind] = useState<"character" | "procedural">("character");
@@ -309,8 +312,11 @@ function Scene({
     colors,
     animation,
     frame,
+    gesture,
+    gestureToken,
     onComplete,
     onImpact,
+    onGestureEnd,
     onBurst: () => setBurst((value) => value + 1),
   };
 
@@ -348,8 +354,11 @@ export function AstronautCanvas({
   colors,
   animation,
   frame = "hero",
+  gesture,
+  gestureToken,
   onComplete,
   onImpact,
+  onGestureEnd,
   className,
 }: AstronautCanvasProps) {
   return (
@@ -370,8 +379,11 @@ export function AstronautCanvas({
         colors={colors}
         animation={animation}
         frame={frame}
+        gesture={gesture}
+        gestureToken={gestureToken}
         onComplete={onComplete}
         onImpact={onImpact}
+        onGestureEnd={onGestureEnd}
       />
     </Canvas>
   );

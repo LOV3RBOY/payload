@@ -1,19 +1,21 @@
 "use client";
 
 import { useGLTF } from "@react-three/drei";
-import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useFrame } from "@react-three/fiber";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
-import { CLIP_PREFERENCES, buildClipRegistry, findClip, listGestures } from "@/components/astronaut/clip-registry";
+import { buildClipRegistry, listGestures } from "@/components/astronaut/clip-registry";
 import type { AstronautCanvasProps } from "@/components/astronaut/types";
+import { clipForGesture } from "@/lib/gestures";
 
-export const AIRTIME_URL = "/models/airtime.glb";
-export const AIRTIME_FALLBACK_URL = "/models/airtime-uncompressed.glb";
+export const AIRTIME_URL = "/models/airtime-rigged.glb";
+export const AIRTIME_FALLBACK_URL = "/models/airtime-rigged-uncompressed.glb";
 
 const DEFAULT_SUIT = "#f4f7fb";
 const DEFAULT_VISOR = "#12141c";
 const DEFAULT_ACCENT = "#5ce1ff";
+const HEAD_BONE = "mixamorig:Head";
 
 function hexRgb(hex: string) {
   const n = Number.parseInt(hex.slice(1), 16);
@@ -60,24 +62,22 @@ function paintAlbedo(
   return texture;
 }
 
-function easeIn(t: number) {
-  return t * t * t;
-}
-
-function clamp01(t: number) {
-  return Math.min(1, Math.max(0, t));
+function quatClose(a: THREE.Quaternion, b: THREE.Quaternion) {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z) + Math.abs(a.w - b.w) < 1e-4;
 }
 
 export function Airtime({
   url = AIRTIME_URL,
   colors,
   animation,
+  gesture = null,
+  gestureToken = 0,
   onComplete,
   onImpact,
+  onGestureEnd,
   onBurst,
 }: AstronautCanvasProps & { url?: string; onBurst: () => void }) {
   const gltf = useGLTF(url, false, true) as { scene: THREE.Group; animations: THREE.AnimationClip[] };
-  const viewport = useThree((state) => state.viewport);
   const cloned = useMemo(() => cloneSkeleton(gltf.scene) as THREE.Group, [gltf.scene]);
   const mixer = useMemo(() => new THREE.AnimationMixer(cloned), [cloned]);
   const registry = useMemo(() => buildClipRegistry(gltf.animations), [gltf.animations]);
@@ -86,7 +86,6 @@ export function Airtime({
     for (const clip of gltf.animations) {
       const action = mixer.clipAction(clip, cloned);
       action.enabled = true;
-      action.setLoop(THREE.LoopRepeat, Infinity);
       map.set(clip.name, action);
     }
     return map;
@@ -107,52 +106,59 @@ export function Airtime({
     return found.current;
   }, [cloned]);
 
-  const motion = useRef<THREE.Group>(null);
   const squash = useRef<THREE.Group>(null);
-  const clock = useRef(0);
   const beat = useRef("");
   const current = useRef<THREE.AnimationAction | null>(null);
+  const queue = useRef<string[]>([]);
   const finished = useRef(false);
   const impacted = useRef(false);
-  const snapped = useRef(false);
-  const start = useRef({ x: 2.2, y: 1.1 });
-  const away = useRef({ x: 2.4, y: 1.4 });
-  const pointer = useRef({ x: 0, y: 0 });
+  const gestureActive = useRef(false);
+  const seenGesture = useRef(0);
+  const animationRef = useRef(animation);
   const onCompleteRef = useRef(onComplete);
   const onImpactRef = useRef(onImpact);
+  const onGestureEndRef = useRef(onGestureEnd);
   const onBurstRef = useRef(onBurst);
-  const scratch = useMemo(
+  const pointer = useRef({ x: 0, y: 0 });
+  const lookScratch = useMemo(
     () => ({
-      q: new THREE.Quaternion(),
-      qWorld: new THREE.Quaternion(),
-      from: new THREE.Vector3(),
-      to: new THREE.Vector3(),
-      bonePos: new THREE.Vector3(),
-      childPos: new THREE.Vector3(),
       euler: new THREE.Euler(),
-      waveTarget: new THREE.Vector3(-0.85, 0.55, 0.25).normalize(),
-      qLocal: new THREE.Quaternion(),
+      delta: new THREE.Quaternion(),
+      base: new THREE.Quaternion(),
+      applied: new THREE.Quaternion(),
     }),
     [],
   );
 
-  const bones = useMemo(() => {
-    const find = (name: string) => cloned.getObjectByName(name) as THREE.Bone | undefined;
-    return {
-      head: find("Head"),
-      spine: find("Spine"),
-      spine01: find("Spine01"),
-      spine02: find("Spine02"),
-      rightArm: find("RightArm"),
-      rightFore: find("RightForeArm"),
-    };
-  }, [cloned]);
+  const head = useMemo(() => cloned.getObjectByName(HEAD_BONE) as THREE.Bone | undefined, [cloned]);
+
+  const play = useCallback(
+    (name: string, once: boolean, fade = 0.22) => {
+      const clip = registry.get(name) ?? registry.get(name.toLowerCase());
+      const next = clip ? actions.get(clip.name) : undefined;
+      if (!next || !clip) return false;
+      actions.forEach((action) => {
+        if (action !== next && (action.isRunning() || action === current.current)) action.fadeOut(fade);
+      });
+      next.enabled = true;
+      next.reset();
+      next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
+      next.clampWhenFinished = once;
+      next.fadeIn(fade).play();
+      current.current = next;
+      beat.current = clip.name;
+      return true;
+    },
+    [actions, registry],
+  );
 
   useEffect(() => {
+    animationRef.current = animation;
     onCompleteRef.current = onComplete;
     onImpactRef.current = onImpact;
+    onGestureEndRef.current = onGestureEnd;
     onBurstRef.current = onBurst;
-  }, [onBurst, onComplete, onImpact]);
+  }, [animation, onBurst, onComplete, onGestureEnd, onImpact]);
 
   useEffect(() => {
     cloned.traverse((object) => {
@@ -191,14 +197,6 @@ export function Airtime({
   }, [cloned, colors.accent, colors.suit, colors.visor, suitMaterial]);
 
   useEffect(() => {
-    clock.current = 0;
-    beat.current = "";
-    finished.current = false;
-    impacted.current = false;
-    snapped.current = false;
-  }, [animation]);
-
-  useEffect(() => {
     const onMove = (event: PointerEvent) => {
       const x = (event.clientX / window.innerWidth) * 2 - 1;
       const y = (event.clientY / window.innerHeight) * 2 - 1;
@@ -208,6 +206,67 @@ export function Airtime({
     window.addEventListener("pointermove", onMove);
     return () => window.removeEventListener("pointermove", onMove);
   }, []);
+
+  useEffect(() => {
+    const onFinished = (event: { action: THREE.AnimationAction }) => {
+      if (event.action !== current.current) return;
+      if (gestureActive.current) {
+        gestureActive.current = false;
+        const back = animationRef.current === "talk" ? "Talk" : "Idle";
+        if (!play(back, false, 0.28)) play("Idle", false, 0.28);
+        onGestureEndRef.current?.();
+        return;
+      }
+      while (queue.current.length > 0) {
+        const next = queue.current.shift();
+        if (next && play(next, true, 0.18)) return;
+      }
+      const anim = animationRef.current;
+      if ((anim === "arrive" || anim === "depart") && !finished.current) {
+        finished.current = true;
+        onCompleteRef.current?.(anim);
+      }
+    };
+    mixer.addEventListener("finished", onFinished);
+    return () => mixer.removeEventListener("finished", onFinished);
+  }, [mixer, play]);
+
+  useEffect(() => {
+    finished.current = false;
+    impacted.current = false;
+    if (gestureActive.current && (animation === "idle" || animation === "talk")) return;
+    gestureActive.current = false;
+    queue.current = [];
+    if (animation === "arrive") {
+      queue.current = ["Land", "DustOff"];
+      if (!play("FlyIn", true, 0.12)) {
+        queue.current = ["DustOff"];
+        if (!play("Land", true, 0.12)) play("Idle", false, 0.2);
+      }
+      return;
+    }
+    if (animation === "depart") {
+      queue.current = ["FlyOff"];
+      if (!play("Wave", true, 0.16)) play("FlyOff", true, 0.16);
+      return;
+    }
+    if (animation === "talk") {
+      if (!play("Talk", false, 0.25)) play("Idle", false, 0.25);
+      return;
+    }
+    play("Idle", false, 0.3);
+  }, [animation, play]);
+
+  useEffect(() => {
+    if (!gesture || gestureToken === seenGesture.current) return;
+    seenGesture.current = gestureToken;
+    if (animation !== "talk" && animation !== "idle") return;
+    const clip = clipForGesture(gesture);
+    if (!clip) return;
+    gestureActive.current = true;
+    queue.current = [];
+    play(clip, true, 0.16);
+  }, [animation, gesture, gestureToken, play]);
 
   useEffect(() => {
     return () => {
@@ -223,172 +282,36 @@ export function Airtime({
 
   useFrame((_, delta) => {
     const step = Math.min(delta, 0.05);
-    if (!snapped.current) {
-      snapped.current = true;
-      const edge = viewport.width / 2 + 0.55;
-      start.current = { x: edge, y: 0.55 + viewport.height * 0.18 };
-      away.current = { x: edge + 0.2, y: 0.7 + viewport.height * 0.28 };
-    }
-    clock.current += step;
-    const t = clock.current;
     mixer.update(step);
+    const action = current.current;
+    if (beat.current === "Land" && action && action.time > 0.22 && !impacted.current) {
+      impacted.current = true;
+      onBurstRef.current();
+      onImpactRef.current?.();
+    }
 
-    const play = (names: readonly string[], fade = 0.28, at?: number) => {
-      const clip = findClip(registry, names);
-      if (!clip) return;
-      if (beat.current === clip.name) return;
-      const next = actions.get(clip.name);
-      if (!next) return;
-      actions.forEach((action) => {
-        if (action !== next) action.fadeOut(fade);
-      });
-      next.enabled = true;
-      next.reset();
-      next.setLoop(THREE.LoopRepeat, Infinity);
-      next.fadeIn(fade).play();
-      if (at !== undefined) next.time = at;
-      current.current = next;
-      beat.current = clip.name;
-    };
-
-    let thrust = 0;
-    let x = 0;
-    let y = 0;
-    let tilt = 0;
     let squashX = 1;
     let squashY = 1;
-    let wave = 0;
-    let breathe = 1;
-    let talk = animation === "talk" ? 1 : 0;
-
-    if (animation === "arrive") {
-      const flyEnd = 0.78;
-      const bounceEnd = 1.22;
-      const settleEnd = 1.5;
-      const doneAt = 2.4;
-      if (t < flyEnd) {
-        const u = easeIn(t / flyEnd);
-        play(CLIP_PREFERENCES.fly, 0.2, 0.42);
-        x = start.current.x * (1 - u);
-        y = start.current.y * (1 - u) + Math.sin(u * Math.PI) * 0.08;
-        tilt = -0.45 * (1 - u);
-        thrust = 1;
-        breathe = 0;
-      } else if (t < bounceEnd) {
-        play(CLIP_PREFERENCES.land, 0.18);
-        const u = clamp01((t - flyEnd) / (bounceEnd - flyEnd));
-        const squash = Math.sin(u * Math.PI);
-        squashX = 1 + squash * 0.22;
-        squashY = 1 - squash * 0.32;
-        y = Math.sin(u * Math.PI) * 0.16;
-        if (!impacted.current) {
-          impacted.current = true;
-          onBurstRef.current();
-          onImpactRef.current?.();
-        }
-      } else if (t < settleEnd) {
-        play(CLIP_PREFERENCES.idle, 0.25);
-        y = 0;
-      } else {
-        play(CLIP_PREFERENCES.idle, 0.2);
-        if (t >= doneAt && !finished.current) {
-          finished.current = true;
-          onCompleteRef.current?.("arrive");
-        }
-      }
-    } else if (animation === "depart") {
-      const waveEnd = 0.9;
-      const doneAt = 1.7;
-      if (t < waveEnd) {
-        const named = findClip(registry, CLIP_PREFERENCES.wave);
-        if (named) play(CLIP_PREFERENCES.wave, 0.2);
-        else play(CLIP_PREFERENCES.idle, 0.2);
-        wave = named ? 0 : 0.62 + Math.sin((t / waveEnd) * Math.PI * 3) * 0.12;
-        talk = 0.4;
-      } else {
-        const u = easeIn((t - waveEnd) / (doneAt - waveEnd));
-        play(CLIP_PREFERENCES.depart, 0.18, 0.4);
-        x = away.current.x * u;
-        y = away.current.y * u;
-        tilt = 0.4 * u;
-        thrust = u;
-        breathe = 0;
-        if (t >= doneAt && !finished.current) {
-          finished.current = true;
-          onCompleteRef.current?.("depart");
-        }
-      }
-    } else if (animation === "talk") {
-      play(CLIP_PREFERENCES.talk, 0.3);
-      y = Math.sin(t * 2.5) * 0.02;
-    } else {
-      play(CLIP_PREFERENCES.idle, 0.35);
-      y = Math.sin(t * 1.6) * 0.012;
+    if (beat.current === "Land" && action && action.time > 0.1 && action.time < 0.46) {
+      const k = Math.sin(((action.time - 0.1) / 0.36) * Math.PI);
+      squashY = 1 - 0.1 * k;
+      squashX = 1 + 0.05 * k;
     }
+    if (squash.current) squash.current.scale.set(squashX, squashY, squashX);
 
-    if (motion.current) {
-      motion.current.position.set(x, y, 0);
-      motion.current.rotation.set(tilt * 0.25, 0, tilt * 0.5);
-    }
-    const breathScale = 1 + Math.sin(clock.current * 1.7) * 0.015 * breathe;
-    if (squash.current) {
-      squash.current.scale.set(squashX, squashY * breathScale, squashX);
-    }
-
-    if (beat.current === "Idle") {
-      for (const bone of [bones.head, bones.spine, bones.spine01, bones.spine02, bones.rightArm]) {
-        if (bone && !bone.userData.rest) bone.userData.rest = bone.quaternion.clone();
-      }
-    }
-
-    const restOf = (bone?: THREE.Bone) => bone?.userData.rest as THREE.Quaternion | undefined;
-    const applyRest = (bone: THREE.Bone | undefined, xRot: number, yRot: number, zRot: number) => {
-      const rest = restOf(bone);
-      if (!bone || !rest) return;
-      scratch.euler.set(xRot, yRot, zRot);
-      scratch.q.setFromEuler(scratch.euler);
-      bone.quaternion.copy(rest).multiply(scratch.q);
-    };
-
-    const look = (animation === "idle" ? 0.6 : 0) + talk;
-    if (look > 0) {
-      applyRest(
-        bones.head,
-        Math.sin(clock.current * 1.1) * 0.05 * look - pointer.current.y * 0.08,
-        Math.sin(clock.current * 0.8) * 0.06 * look + pointer.current.x * 0.1,
-        0,
-      );
-    }
-    if (breathe > 0) {
-      const breath = Math.sin(clock.current * 1.7) * 0.035 * breathe;
-      applyRest(bones.spine02, breath, 0, 0);
-      applyRest(bones.spine01, breath * 0.6, 0, 0);
-      applyRest(bones.spine, breath * 0.3, 0, 0);
-    }
-    if (wave > 0.02) applyRest(bones.rightArm, 0, 0, -1.15 * wave);
-
-    const jets = squash.current?.getObjectByName("airtime-jets");
-    if (jets) {
-      jets.visible = thrust > 0.04;
-      jets.scale.setScalar(0.4 + thrust);
+    const looking = !gestureActive.current && (beat.current === "Idle" || beat.current === "Talk");
+    if (head && looking) {
+      if (!quatClose(head.quaternion, lookScratch.applied)) lookScratch.base.copy(head.quaternion);
+      lookScratch.euler.set(-pointer.current.y * 0.06, pointer.current.x * 0.08, 0);
+      lookScratch.delta.setFromEuler(lookScratch.euler);
+      head.quaternion.copy(lookScratch.base).multiply(lookScratch.delta);
+      lookScratch.applied.copy(head.quaternion);
     }
   });
 
   return (
-    <group ref={motion}>
-      <group ref={squash}>
-        <primitive object={cloned} position={[0, 0.02, 0]} />
-        <group name="airtime-jets" position={[0, 0.05, -0.08]} visible={false}>
-          <mesh position={[-0.08, 0, 0]}>
-            <sphereGeometry args={[0.035, 10, 10]} />
-            <meshBasicMaterial color={colors.accent} transparent opacity={0.9} />
-          </mesh>
-          <mesh position={[0.08, 0, 0]}>
-            <sphereGeometry args={[0.035, 10, 10]} />
-            <meshBasicMaterial color={colors.accent} transparent opacity={0.9} />
-          </mesh>
-        </group>
-      </group>
+    <group ref={squash}>
+      <primitive object={cloned} position={[0, 0.01, 0]} />
     </group>
   );
 }

@@ -12,7 +12,10 @@ export type AstronautCanvasProps = {
   colors: AstronautColors;
   animation: AstronautAnimation;
   frame?: AstronautFrame;
+  gesture?: string | null;
+  gestureToken?: number;
   onComplete?: (animation: AstronautAnimation) => void;
   onImpact?: () => void;
+  onGestureEnd?: () => void;
   className?: string;
 };
