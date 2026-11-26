@@ -21,20 +21,20 @@ Copy `.env.example` to `.env.local`.
 | --- | --- |
 | `LLM_API_KEY` | Nous Portal key. This is the only secret. Leave it empty and replies stay canned. |
 | `LLM_BASE_URL` | OpenAI-compatible Portal base. Default `https://inference-api.nousresearch.com/v1`. |
-| `LLM_MODEL` | Default `Hermes-4-70B`, the Hermes 4 70B id in the Portal docs and on `NousResearch/Hermes-4-70B`. |
+| `LLM_MODEL` | Default `deepseek/deepseek-v4-pro` (DeepSeek V4 Pro). Hermes-4-70B is retired. |
 | `SUPABASE_URL` | Optional. Switches persistence off the local JSON file. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only key. Never expose it in the browser. |
 | `NEXT_PUBLIC_APP_URL` | Absolute origin for Open Graph metadata. `VERCEL_URL` is used when this is empty. |
 
-The chat route is the only caller of `src/lib/llm/adapter.ts`. With `LLM_API_KEY` set, it streams Hermes 4 70B from Nous Portal (`LLM_BASE_URL`, default `https://inference-api.nousresearch.com/v1`, model `Hermes-4-70B`). Hermes 4 is a hybrid reasoning model, so the request sends `chat_template_kwargs.enable_thinking: false` and strips any `<think>` blocks. If the provider rejects that field, the adapter retries once without it. If the key is missing, or the call fails, the same route answers with an in-character canned line and the landing still plays. A live check of `Hermes-4-70B` on that base URL currently returns `404` with “This model has been retired.” Put a key in `.env.local` only when you have one, then restart:
+The chat route is the only caller of `src/lib/llm/adapter.ts`. With `LLM_API_KEY` set, it streams DeepSeek V4 Pro from Nous Portal (`LLM_BASE_URL`, default `https://inference-api.nousresearch.com/v1`, model `deepseek/deepseek-v4-pro`). The request sends `chat_template_kwargs.enable_thinking: false` and strips any `<think>` blocks so the courier stays short. If the provider rejects that field, the adapter retries once without it. If the key is missing, or the call fails, the same route answers with an in-character canned line and the landing still plays. Put a key in `.env.local` only when you have one, then restart:
 
 ```bash
 LLM_API_KEY=your-portal-key
 LLM_BASE_URL=https://inference-api.nousresearch.com/v1
-LLM_MODEL=Hermes-4-70B
+LLM_MODEL=deepseek/deepseek-v4-pro
 ```
 
-Chat responses include `X-Payload-Voice: hermes` when a key is set and `X-Payload-Voice: canned` when it is not. The header says which path was selected. A failed Hermes call still returns the canned line.
+Chat responses include `X-Payload-Voice: portal` when a key is set and `X-Payload-Voice: canned` when it is not. A failed model call still returns the canned line.
 
 Supabase schema: `supabase/schema.sql`. Row level security is on and there are no anon policies. Only the service role, used from route handlers, can read or write.
 

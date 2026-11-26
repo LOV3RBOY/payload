@@ -5,12 +5,11 @@ import { getStore } from "@/lib/storage";
 import type { ChatTurn, Delivery } from "@/lib/storage/types";
 
 // Nous Portal, OpenAI-compatible.
-// Base URL and Hermes-4-70B are the ids in
-// https://hermes-agent.nousresearch.com/docs/integrations/nous-portal
-// and https://huggingface.co/NousResearch/Hermes-4-70B.
+// Hermes-4-70B is retired. Default is DeepSeek V4 Pro, a current text
+// flagship on the live /v1/models catalog (deepseek/deepseek-v4-pro).
 // An empty LLM_API_KEY, or any failed call, uses the canned voice.
 const DEFAULT_BASE_URL = "https://inference-api.nousresearch.com/v1";
-const DEFAULT_MODEL = "Hermes-4-70B";
+const DEFAULT_MODEL = "deepseek/deepseek-v4-pro";
 
 export function llmConfigured(): boolean {
   return Boolean(process.env.LLM_API_KEY?.trim());
